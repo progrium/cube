@@ -10,6 +10,8 @@ program
   .option('-h, --host [host]', 'specify host to use [localhost]', 'localhost')
   .option('-p, --port [port]', 'specify port to use [default]', null)
   .option('-d, --database [name]', 'specify database to use [cube_development]', 'cube_development')
+  .option('-t, --timeout [miliseconds]', 'timeout to disconnect from evaluator', '50')
+;
 
 program
   .command('types')
@@ -68,6 +70,7 @@ program
   .command('query <timeago> <step> <expression>')
   .description('perform a query in Cube')
   .action(function(timeago, step, expression) {
+    var port = program.port || 1081;
     deltaUnits = {
       'm': 60 * 1000,
       'h': 3600 * 1000,
@@ -78,10 +81,28 @@ program
     query = {'expression': expression, 'start': start, 'stop': stop, 'step': step}
     console.log(JSON.stringify(query));
     var client = new websocket.client();
-    client.on("connect", function(connection) { socket = connection; flush(); });
-    client.on("connectFailed", reopen);
-    client.connect(url);
-
+    var timer;
+    client.on("connect", function(connection) {
+      connection.on('message', function(message) {
+        if (timer) {
+          clearTimeout(timer);
+        }
+        timer = setTimeout(function() {
+          connection.close();
+        }, program.timeout);
+        if (message.type === 'utf8') {
+          console.log(message.utf8Data);
+        }
+      });
+      connection.on('error', function(error) {
+        console.log("Connection Error: " + error.toString());
+      });
+      connection.on('close', function() {
+        console.log('Connection Closed');
+      });
+      connection.sendUTF(JSON.stringify(query));
+    });
+    client.connect('ws://'+program.host+':'+port+'/1.0/metric/get');
   });
 
 program.parse(process.argv);
